@@ -55,6 +55,13 @@
   .item .n { flex: 1; cursor: pointer; }
   .item .m { font-size: 12px; color: #8b8f99; white-space: nowrap; }
   .item .x { color: #e07070; cursor: pointer; padding: 0 4px; }
+  .mapbox { position: relative; }
+  .maplist { display: none; position: absolute; left: 0; right: 0; top: 100%; margin-top: 4px; z-index: 5;
+             background: #1d2027; border: 1px solid #2c3039; border-radius: 12px; max-height: 260px; overflow-y: auto; }
+  .maplist.open { display: block; }
+  .opt { padding: 11px 14px; font-size: 15px; cursor: pointer; }
+  .opt.on, .opt:hover { background: #2c3039; }
+  .opt b { color: #f99e1a; font-weight: 600; }
   .label { font-size: 12px; color: #8b8f99; margin: 14px 0 6px; }
   details { margin-top: 28px; color: #8b8f99; font-size: 13px; }
   summary { cursor: pointer; }
@@ -73,9 +80,9 @@
       <input id="addName" type="text" placeholder="닉네임#태그 (예: 홍길동#31234)" autocomplete="off">
       <input id="addBy" type="text" placeholder="추가자" value="손건준" autocomplete="off">
     </div>
-    <div class="row2">
-      <input id="addMap" type="text" list="maps" placeholder="만난 맵 (선택)" autocomplete="off">
-      <datalist id="maps"></datalist>
+    <div class="row2 mapbox">
+      <input id="addMap" type="text" placeholder="만난 맵 검색 (선택) — 초성도 됨: ㄷㄹㄷ" autocomplete="off">
+      <div id="mapList" class="maplist"></div>
     </div>
     <div class="row2"><button id="addBtn" style="width:100%;height:44px">추가</button></div>
     <div id="addMsg" class="msg"></div>
@@ -133,13 +140,46 @@ const MAPS = ["남극 반도","부산","일리오스","리장 타워","네팔","
   "서킷 로얄","도라도","하바나","쓰레기촌","리알토","66번 국도","샴발리 수도원","감시 기지: 지브롤터",
   "블리자드 월드","아이헨발데","할리우드","왕의 길","미드타운","눔바니","파라이수",
   "콜로세오","이스페란사","뉴 퀸 스트리트","루나사피","뉴 정크 시티","수라바사","하나오카","아누비스의 왕좌"];
-document.getElementById("maps").innerHTML = MAPS.map(m => `<option value="${m}">`).join("");
+
+// 맵 검색: 부분 일치 + 초성 검색 (예: ㄷㄹㄷ → 도라도)
+const CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
+const choOf = s => [...s].map(c => {
+  const k = c.charCodeAt(0) - 0xAC00;
+  return (k >= 0 && k < 11172) ? CHO[Math.floor(k / 588)] : c;
+}).join("");
+const squash = s => s.toLowerCase().replace(/[\s:]/g, "");
+const MAP_IDX = MAPS.map(m => ({ m, n: squash(m), c: squash(choOf(m)) }));
+function searchMaps(q) {
+  const s = squash(q);
+  if (!s) return MAPS.slice();
+  return MAP_IDX.filter(x => x.n.includes(s) || x.c.includes(s))
+    .sort((a, b) => (b.n.startsWith(s) || b.c.startsWith(s)) - (a.n.startsWith(s) || a.c.startsWith(s)))
+    .map(x => x.m);
+}
 
 const q = document.getElementById("q");
 const res = document.getElementById("result");
 const addName = document.getElementById("addName");
 const addBy = document.getElementById("addBy");
 const addMap = document.getElementById("addMap");
+const mapList = document.getElementById("mapList");
+let mapOpts = [], mapSel = -1;
+function drawMaps() {
+  mapOpts = searchMaps(addMap.value);
+  if (!mapOpts.length) { mapList.className = "maplist"; return; }
+  if (mapSel >= mapOpts.length) mapSel = mapOpts.length - 1;
+  mapList.innerHTML = mapOpts.map((m, i) => `<div class="opt${i === mapSel ? " on" : ""}" data-map="${esc(m)}">${esc(m)}</div>`).join("");
+  mapList.className = "maplist open";
+  const on = mapList.querySelector(".on"); if (on) on.scrollIntoView({ block: "nearest" });
+}
+function closeMaps() { mapList.className = "maplist"; mapSel = -1; }
+addMap.addEventListener("focus", () => { mapSel = -1; drawMaps(); });
+addMap.addEventListener("input", () => { mapSel = addMap.value.trim() ? 0 : -1; drawMaps(); });
+addMap.addEventListener("blur", () => setTimeout(closeMaps, 150));
+mapList.addEventListener("mousedown", e => {
+  const o = e.target.closest("[data-map]");
+  if (o) { e.preventDefault(); addMap.value = o.dataset.map; closeMaps(); }
+});
 const addMsg = document.getElementById("addMsg");
 
 try { const b = localStorage.getItem("blacklist_by"); if (b) addBy.value = b; } catch (e) {}
@@ -247,7 +287,20 @@ function addEntry() {
 q.addEventListener("input", check);
 document.getElementById("addBtn").addEventListener("click", addEntry);
 addName.addEventListener("keydown", e => { if (e.key === "Enter") addEntry(); });
-addMap.addEventListener("keydown", e => { if (e.key === "Enter") addEntry(); });
+addMap.addEventListener("keydown", e => {
+  if (e.isComposing) return;
+  const open = mapList.classList.contains("open");
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!open) { drawMaps(); return; }
+    mapSel = Math.max(0, Math.min(mapOpts.length - 1, mapSel + (e.key === "ArrowDown" ? 1 : -1)));
+    drawMaps();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (open && mapSel >= 0 && mapOpts[mapSel]) { addMap.value = mapOpts[mapSel]; closeMaps(); }
+    else { closeMaps(); addEntry(); }
+  } else if (e.key === "Escape") closeMaps();
+});
 
 renderAll();
 }
