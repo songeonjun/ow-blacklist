@@ -45,6 +45,17 @@
   .msg { font-size: 13px; margin-top: 8px; min-height: 18px; }
   .tag.mine { border: 1px solid #f99e1a55; }
   .tag .x { margin-left: 6px; color: #e07070; cursor: pointer; }
+  .meta { font-size: 13px; color: #c9a0a0; margin-top: 6px; }
+  .row2 { display: flex; gap: 8px; margin-bottom: 8px; }
+  .row2 input { font-size: 15px; padding: 12px 14px; }
+  .row2 input#addBy { max-width: 140px; }
+  .list { margin-top: 8px; }
+  .item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+          background: rgba(255,255,255,0.05); margin-bottom: 6px; font-size: 14px; color: #c9ccd3; }
+  .item .n { flex: 1; cursor: pointer; }
+  .item .m { font-size: 12px; color: #8b8f99; white-space: nowrap; }
+  .item .x { color: #e07070; cursor: pointer; padding: 0 4px; }
+  .label { font-size: 12px; color: #8b8f99; margin: 14px 0 6px; }
   details { margin-top: 28px; color: #8b8f99; font-size: 13px; }
   summary { cursor: pointer; }
   details .tags .tag { color: #c9ccd3; }
@@ -58,19 +69,22 @@
   <div id="result" class="result"></div>
   <div class="add">
     <h2>블랙리스트 추가</h2>
-    <div class="row">
+    <div class="row2">
       <input id="addName" type="text" placeholder="닉네임#태그 (예: 홍길동#31234)" autocomplete="off">
-      <button id="addBtn">추가</button>
+      <input id="addBy" type="text" placeholder="추가자" value="손건준" autocomplete="off">
     </div>
+    <div class="row2"><button id="addBtn" style="width:100%;height:44px">추가</button></div>
     <div id="addMsg" class="msg"></div>
   </div>
   <details>
     <summary id="count"></summary>
-    <div class="tags" id="all"></div>
+    <div id="all"></div>
   </details>
 </div>
 
 <script>
+{
+// 기존 목록 (추가일시/추가자 정보 없음)
 const BASE = [
   "벛꽃#31439","자몽#32845","tom#36200","jerry#37219","뚝2스딱스#3561","캐리할게#3962",
   "hastans#3779","문어순대#3675","nyanggun85#3937","ana#34794","mushbellom#3141","깨방정하#3822",
@@ -81,32 +95,43 @@ const BASE = [
   "아나키리고아냐#3779","spectra#31256","우쭈쭈받기#3544","선인장#31695","Suguru#31638","별에서온그대#31173",
   "광물줘패는계정#3743","CJAMM#31152","고애신#3793","vov#31247","JJHJ#31940","Luce#31194",
   "응애나살려줘#3859"
+].map(tag => ({ tag }));
+
+// 새로 추가된 목록 (모두에게 보임) — 형식: { tag: "닉네임#태그", at: "2026-11-20 16:05", by: "손건준" }
+const SHARED = [
 ];
 
-// 직접 추가한 닉네임은 이 브라우저에 저장됨
+// 페이지에서 직접 추가한 닉네임은 이 브라우저에만 저장됨
 const KEY = "blacklist_added_v1";
 function loadAdded() {
-  try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; }
+  try {
+    const arr = JSON.parse(localStorage.getItem(KEY)) || [];
+    return arr.map(x => typeof x === "string" ? { tag: x } : x);
+  } catch (e) { return []; }
 }
 function saveAdded(arr) {
   try { localStorage.setItem(KEY, JSON.stringify(arr)); return true; } catch (e) { return false; }
 }
 let ADDED = loadAdded();
-let LIST = BASE.concat(ADDED);
-function refresh() {
-  LIST = BASE.concat(ADDED);
-  renderAll();
-  check();
-}
+let LIST = [];
 
 const norm = s => s.trim().toLowerCase();
 const nameOf = t => t.split("#")[0];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad = n => String(n).padStart(2, "0");
+function nowStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+const metaText = e => (e.at || e.by) ? [e.at && `추가일시 ${e.at}`, e.by && `추가자 ${e.by}`].filter(Boolean).join(" · ") : "";
+
 const q = document.getElementById("q");
 const res = document.getElementById("result");
+const addName = document.getElementById("addName");
+const addBy = document.getElementById("addBy");
+const addMsg = document.getElementById("addMsg");
 
-function esc(s) {
-  return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-}
+try { const b = localStorage.getItem("blacklist_by"); if (b) addBy.value = b; } catch (e) {}
 
 function check() {
   const raw = norm(q.value);
@@ -114,21 +139,22 @@ function check() {
   res.className = "result";
   if (!input) { res.innerHTML = ""; return; }
 
-  const exact = LIST.filter(t => norm(nameOf(t)) === input);
+  const exact = LIST.filter(e => norm(nameOf(e.tag)) === input);
   if (exact.length) {
     res.className = "result hit";
     res.innerHTML = `<div class="big">🚫 블랙리스트 맞음</div>` +
-      `<div class="tags">${exact.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` +
-      (raw.includes("#") && !exact.some(t => norm(t) === raw)
+      exact.map(e => `<div style="margin-top:8px"><span class="tag">${esc(e.tag)}</span>` +
+        (metaText(e) ? `<div class="meta">${esc(metaText(e))}</div>` : "") + `</div>`).join("") +
+      (raw.includes("#") && !exact.some(e => norm(e.tag) === raw)
         ? `<div style="margin-top:8px;font-size:13px;color:#e0a0a0">※ 닉네임은 같지만 태그 번호가 달라요</div>` : "");
     return;
   }
 
-  const near = LIST.filter(t => norm(nameOf(t)).includes(input));
+  const near = LIST.filter(e => norm(nameOf(e.tag)).includes(input));
   if (near.length) {
     res.className = "result near";
     res.innerHTML = `<div class="big">⚠️ 정확히 일치하는 닉네임 없음</div>비슷한 닉네임:` +
-      `<div class="tags">${near.map(t => `<span class="tag" data-n="${esc(nameOf(t))}">${esc(t)}</span>`).join("")}</div>`;
+      `<div class="tags">${near.map(e => `<span class="tag" data-n="${esc(nameOf(e.tag))}">${esc(e.tag)}</span>`).join("")}</div>`;
     return;
   }
 
@@ -136,62 +162,80 @@ function check() {
   res.innerHTML = `<div class="big">✅ 블랙리스트 아님</div>`;
 }
 
-q.addEventListener("input", check);
-document.addEventListener("click", e => {
-  const del = e.target.dataset && e.target.dataset.del;
-  if (del) {
-    if (!confirmDel(del)) return;
-    ADDED = ADDED.filter(t => t !== del);
-    saveAdded(ADDED);
-    refresh();
-    return;
-  }
-  const n = e.target.dataset && e.target.dataset.n;
-  if (n) { q.value = n; check(); q.focus(); }
-});
-
-// 삭제는 두 번 눌러야 됨 (실수 방지)
-let pendingDel = null;
-function confirmDel(t) {
-  if (pendingDel === t) { pendingDel = null; return true; }
-  pendingDel = t;
-  addMsg.style.color = "#e0a0a0";
-  addMsg.textContent = `${t} 삭제하려면 ✕를 한 번 더 누르세요`;
-  return false;
+function itemHtml(e, deletable) {
+  const m = metaText(e);
+  return `<div class="item"><span class="n" data-n="${esc(nameOf(e.tag))}">${esc(e.tag)}</span>` +
+    (m ? `<span class="m">${esc(m)}</span>` : "") +
+    (deletable ? `<span class="x" data-del="${esc(e.tag)}">✕</span>` : "") + `</div>`;
 }
 
 function renderAll() {
-  document.getElementById("count").textContent =
-    `전체 목록 보기 (${LIST.length}명` + (ADDED.length ? `, 직접 추가 ${ADDED.length}명)` : ")");
-  document.getElementById("all").innerHTML =
-    BASE.map(t => `<span class="tag" data-n="${esc(nameOf(t))}">${esc(t)}</span>`).join("") +
-    ADDED.map(t => `<span class="tag mine" data-n="${esc(nameOf(t))}">${esc(t)}<span class="x" data-del="${esc(t)}">✕</span></span>`).join("");
+  LIST = BASE.concat(SHARED, ADDED);
+  document.getElementById("count").textContent = `전체 목록 보기 (${LIST.length}명)`;
+  const newer = SHARED.concat(ADDED);
+  let html = "";
+  if (newer.length) {
+    html += `<div class="label">새로 추가됨</div><div class="list">` +
+      SHARED.map(e => itemHtml(e, false)).join("") +
+      ADDED.slice().reverse().map(e => itemHtml(e, true)).join("") + `</div>`;
+  }
+  html += `<div class="label">기존 목록</div><div class="tags">` +
+    BASE.map(e => `<span class="tag" data-n="${esc(nameOf(e.tag))}">${esc(e.tag)}</span>`).join("") + `</div>`;
+  document.getElementById("all").innerHTML = html;
 }
 
-const addName = document.getElementById("addName");
-const addMsg = document.getElementById("addMsg");
+function refresh() { renderAll(); check(); }
+
+// 삭제는 두 번 눌러야 됨 (실수 방지)
+let pendingDel = null;
+document.addEventListener("click", ev => {
+  const d = ev.target.dataset || {};
+  if (d.del) {
+    if (pendingDel !== d.del) {
+      pendingDel = d.del;
+      addMsg.style.color = "#e0a0a0";
+      addMsg.textContent = `${d.del} 삭제하려면 ✕를 한 번 더 누르세요`;
+      return;
+    }
+    pendingDel = null;
+    ADDED = ADDED.filter(e => e.tag !== d.del);
+    saveAdded(ADDED);
+    addMsg.textContent = "";
+    refresh();
+    return;
+  }
+  if (d.n) { q.value = d.n; check(); q.focus(); }
+});
+
 function addEntry() {
   const v = addName.value.trim().replace(/\s*#\s*/, "#");
+  const by = addBy.value.trim();
   addMsg.style.color = "#e0a0a0";
   if (!/^[^#\s]+#\d{3,6}$/.test(v)) {
     addMsg.textContent = "닉네임#태그 형식으로 입력하세요 (예: 홍길동#31234)";
     return;
   }
-  if (LIST.some(t => norm(t) === norm(v))) {
+  if (!by) { addMsg.textContent = "추가자를 입력하세요"; return; }
+  if (LIST.some(e => norm(e.tag) === norm(v))) {
     addMsg.textContent = "이미 블랙리스트에 있어요";
     return;
   }
-  ADDED.push(v);
+  const entry = { tag: v, at: nowStr(), by };
+  ADDED.push(entry);
   const ok = saveAdded(ADDED);
+  try { localStorage.setItem("blacklist_by", by); } catch (e) {}
   addName.value = "";
   addMsg.style.color = "#7fd49a";
-  addMsg.textContent = ok ? `${v} 추가됨` : `${v} 추가됨 (이 브라우저에선 저장이 안 돼서 새로고침하면 사라져요)`;
+  addMsg.textContent = `${v} 추가됨 (${entry.at}, ${by})` + (ok ? "" : " — 이 브라우저에선 저장이 안 돼서 새로고침하면 사라져요");
   refresh();
 }
+
+q.addEventListener("input", check);
 document.getElementById("addBtn").addEventListener("click", addEntry);
 addName.addEventListener("keydown", e => { if (e.key === "Enter") addEntry(); });
 
 renderAll();
+}
 </script>
 </body>
 </html>
