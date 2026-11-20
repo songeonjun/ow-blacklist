@@ -73,6 +73,10 @@
       <input id="addName" type="text" placeholder="닉네임#태그 (예: 홍길동#31234)" autocomplete="off">
       <input id="addBy" type="text" placeholder="추가자" value="손건준" autocomplete="off">
     </div>
+    <div class="row2">
+      <input id="addMap" type="text" list="maps" placeholder="만난 맵 (선택)" autocomplete="off">
+      <datalist id="maps"></datalist>
+    </div>
     <div class="row2"><button id="addBtn" style="width:100%;height:44px">추가</button></div>
     <div id="addMsg" class="msg"></div>
   </div>
@@ -97,7 +101,7 @@ const BASE = [
   "응애나살려줘#3859"
 ].map(tag => ({ tag }));
 
-// 새로 추가된 목록 (모두에게 보임) — 형식: { tag: "닉네임#태그", at: "2026-11-20 16:05", by: "손건준" }
+// 새로 추가된 목록 (모두에게 보임) — 형식: { tag: "닉네임#태그", map: "도라도", at: "2026-11-20 16:05", by: "손건준" }
 const SHARED = [
 ];
 
@@ -123,12 +127,19 @@ function nowStr() {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-const metaText = e => (e.at || e.by) ? [e.at && `추가일시 ${e.at}`, e.by && `추가자 ${e.by}`].filter(Boolean).join(" · ") : "";
+const metaText = e => [e.map && `맵 ${e.map}`, e.at && `추가일시 ${e.at}`, e.by && `추가자 ${e.by}`].filter(Boolean).join(" · ");
+
+const MAPS = ["남극 반도","부산","일리오스","리장 타워","네팔","오아시스","사모아",
+  "서킷 로얄","도라도","하바나","쓰레기촌","리알토","66번 국도","샴발리 수도원","감시 기지: 지브롤터",
+  "블리자드 월드","아이헨발데","할리우드","왕의 길","미드타운","눔바니","파라이수",
+  "콜로세오","이스페란사","뉴 퀸 스트리트","루나사피","뉴 정크 시티","수라바사","하나오카","아누비스의 왕좌"];
+document.getElementById("maps").innerHTML = MAPS.map(m => `<option value="${m}">`).join("");
 
 const q = document.getElementById("q");
 const res = document.getElementById("result");
 const addName = document.getElementById("addName");
 const addBy = document.getElementById("addBy");
+const addMap = document.getElementById("addMap");
 const addMsg = document.getElementById("addMsg");
 
 try { const b = localStorage.getItem("blacklist_by"); if (b) addBy.value = b; } catch (e) {}
@@ -220,19 +231,23 @@ function addEntry() {
     addMsg.textContent = "이미 블랙리스트에 있어요";
     return;
   }
+  const map = addMap.value.trim();
   const entry = { tag: v, at: nowStr(), by };
+  if (map) entry.map = map;
   ADDED.push(entry);
   const ok = saveAdded(ADDED);
   try { localStorage.setItem("blacklist_by", by); } catch (e) {}
   addName.value = "";
+  addMap.value = "";
   addMsg.style.color = "#7fd49a";
-  addMsg.textContent = `${v} 추가됨 (${entry.at}, ${by})` + (ok ? "" : " — 이 브라우저에선 저장이 안 돼서 새로고침하면 사라져요");
+  addMsg.textContent = `${v} 추가됨 (${[map, entry.at, by].filter(Boolean).join(", ")})` + (ok ? "" : " — 이 브라우저에선 저장이 안 돼서 새로고침하면 사라져요");
   refresh();
 }
 
 q.addEventListener("input", check);
 document.getElementById("addBtn").addEventListener("click", addEntry);
 addName.addEventListener("keydown", e => { if (e.key === "Enter") addEntry(); });
+addMap.addEventListener("keydown", e => { if (e.key === "Enter") addEntry(); });
 
 renderAll();
 }
