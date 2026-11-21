@@ -38,6 +38,7 @@
   .add h2 { font-size: 16px; margin: 0 0 10px; }
   .row { display: flex; gap: 8px; }
   .row input { font-size: 15px; padding: 12px 14px; }
+  button:disabled { opacity: .6; cursor: default; }
   button {
     padding: 0 18px; border: 0; border-radius: 12px; font-size: 15px; font-weight: 600;
     background: #f99e1a; color: #15171c; cursor: pointer; white-space: nowrap;
@@ -95,6 +96,9 @@
 
 <script>
 {
+// 공유 목록 API (Google 시트에 저장됨)
+const API = "https://script.google.com/macros/s/AKfycbx8xfKfFMs38uNwnD0O2sMVJDlGdNORHiKA9TCCOPYw5ZbarqTwWYujJVsQsK8k3MatqQ/exec";
+
 // 기존 목록 (추가일시/추가자 정보 없음)
 const BASE = [
   "벛꽃#31439","자몽#32845","tom#36200","jerry#37219","뚝2스딱스#3561","캐리할게#3962",
@@ -108,32 +112,14 @@ const BASE = [
   "응애나살려줘#3859"
 ].map(tag => ({ tag }));
 
-// 새로 추가된 목록 (모두에게 보임) — 형식: { tag: "닉네임#태그", map: "도라도", at: "2026-11-20 16:05", by: "손건준" }
-const SHARED = [
-];
+// 모두가 추가한 목록 (서버에서 불러옴)
+let SHARED = [];
+let loaded = false;
+let LIST = BASE.slice();
 
-// 페이지에서 직접 추가한 닉네임은 이 브라우저에만 저장됨
-const KEY = "blacklist_added_v1";
-function loadAdded() {
-  try {
-    const arr = JSON.parse(localStorage.getItem(KEY)) || [];
-    return arr.map(x => typeof x === "string" ? { tag: x } : x);
-  } catch (e) { return []; }
-}
-function saveAdded(arr) {
-  try { localStorage.setItem(KEY, JSON.stringify(arr)); return true; } catch (e) { return false; }
-}
-let ADDED = loadAdded();
-let LIST = [];
-
-const norm = s => s.trim().toLowerCase();
+const norm = s => String(s).trim().toLowerCase();
 const nameOf = t => t.split("#")[0];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const pad = n => String(n).padStart(2, "0");
-function nowStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 const metaText = e => [e.map && `맵 ${e.map}`, e.at && `추가일시 ${e.at}`, e.by && `추가자 ${e.by}`].filter(Boolean).join(" · ");
 
 const MAPS = ["남극 반도","부산","일리오스","리장 타워","네팔","오아시스","사모아",
@@ -162,28 +148,36 @@ const res = document.getElementById("result");
 const addName = document.getElementById("addName");
 const addBy = document.getElementById("addBy");
 const addMap = document.getElementById("addMap");
-const mapList = document.getElementById("mapList");
-let mapOpts = [], mapSel = -1;
-function drawMaps() {
-  mapOpts = searchMaps(addMap.value);
-  if (!mapOpts.length) { mapList.className = "maplist"; return; }
-  if (mapSel >= mapOpts.length) mapSel = mapOpts.length - 1;
-  mapList.innerHTML = mapOpts.map((m, i) => `<div class="opt${i === mapSel ? " on" : ""}" data-map="${esc(m)}">${esc(m)}</div>`).join("");
-  mapList.className = "maplist open";
-  const on = mapList.querySelector(".on"); if (on) on.scrollIntoView({ block: "nearest" });
-}
-function closeMaps() { mapList.className = "maplist"; mapSel = -1; }
-addMap.addEventListener("focus", () => { mapSel = -1; drawMaps(); });
-addMap.addEventListener("input", () => { mapSel = addMap.value.trim() ? 0 : -1; drawMaps(); });
-addMap.addEventListener("blur", () => setTimeout(closeMaps, 150));
-mapList.addEventListener("mousedown", e => {
-  const o = e.target.closest("[data-map]");
-  if (o) { e.preventDefault(); addMap.value = o.dataset.map; closeMaps(); }
-});
+const addBtn = document.getElementById("addBtn");
 const addMsg = document.getElementById("addMsg");
+const mapList = document.getElementById("mapList");
 
 try { const b = localStorage.getItem("blacklist_by"); if (b) addBy.value = b; } catch (e) {}
 
+function msg(text, ok) { addMsg.style.color = ok ? "#7fd49a" : "#e0a0a0"; addMsg.textContent = text; }
+
+// ---- 서버 통신 ----
+async function api(params) {
+  const url = API + "?" + new URLSearchParams(params).toString();
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+function setShared(list) {
+  if (Array.isArray(list)) SHARED = list.filter(e => e && e.tag);
+  loaded = true;
+  refresh();
+}
+async function load() {
+  try {
+    const d = await api({ t: Date.now() });
+    setShared(d.list);
+  } catch (e) {
+    if (!loaded) msg("공유 목록을 불러오지 못했어요. 잠시 후 새로고침 해보세요.");
+  }
+}
+
+// ---- 조회 ----
 function check() {
   const raw = norm(q.value);
   const input = raw.split("#")[0];
@@ -210,25 +204,23 @@ function check() {
   }
 
   res.className = "result miss";
-  res.innerHTML = `<div class="big">✅ 블랙리스트 아님</div>`;
+  res.innerHTML = `<div class="big">✅ 블랙리스트 아님</div>` +
+    (loaded ? "" : `<div style="font-size:13px;margin-top:4px;color:#a0c8b0">공유 목록 불러오는 중…</div>`);
 }
 
-function itemHtml(e, deletable) {
+function itemHtml(e) {
   const m = metaText(e);
   return `<div class="item"><span class="n" data-n="${esc(nameOf(e.tag))}">${esc(e.tag)}</span>` +
-    (m ? `<span class="m">${esc(m)}</span>` : "") +
-    (deletable ? `<span class="x" data-del="${esc(e.tag)}">✕</span>` : "") + `</div>`;
+    (m ? `<span class="m">${esc(m)}</span>` : "") + `</div>`;
 }
 
 function renderAll() {
-  LIST = BASE.concat(SHARED, ADDED);
-  document.getElementById("count").textContent = `전체 목록 보기 (${LIST.length}명)`;
-  const newer = SHARED.concat(ADDED);
+  LIST = BASE.concat(SHARED);
+  document.getElementById("count").textContent = `전체 목록 보기 (${LIST.length}명)` + (loaded ? "" : " · 불러오는 중…");
   let html = "";
-  if (newer.length) {
-    html += `<div class="label">새로 추가됨</div><div class="list">` +
-      SHARED.map(e => itemHtml(e, false)).join("") +
-      ADDED.slice().reverse().map(e => itemHtml(e, true)).join("") + `</div>`;
+  if (SHARED.length) {
+    html += `<div class="label">새로 추가됨 (최신순)</div><div class="list">` +
+      SHARED.slice().reverse().map(itemHtml).join("") + `</div>`;
   }
   html += `<div class="label">기존 목록</div><div class="tags">` +
     BASE.map(e => `<span class="tag" data-n="${esc(nameOf(e.tag))}">${esc(e.tag)}</span>`).join("") + `</div>`;
@@ -237,56 +229,58 @@ function renderAll() {
 
 function refresh() { renderAll(); check(); }
 
-// 삭제는 두 번 눌러야 됨 (실수 방지)
-let pendingDel = null;
 document.addEventListener("click", ev => {
-  const d = ev.target.dataset || {};
-  if (d.del) {
-    if (pendingDel !== d.del) {
-      pendingDel = d.del;
-      addMsg.style.color = "#e0a0a0";
-      addMsg.textContent = `${d.del} 삭제하려면 ✕를 한 번 더 누르세요`;
-      return;
-    }
-    pendingDel = null;
-    ADDED = ADDED.filter(e => e.tag !== d.del);
-    saveAdded(ADDED);
-    addMsg.textContent = "";
-    refresh();
-    return;
-  }
-  if (d.n) { q.value = d.n; check(); q.focus(); }
+  const n = ev.target.dataset && ev.target.dataset.n;
+  if (n) { q.value = n; check(); q.focus(); }
 });
 
-function addEntry() {
+// ---- 추가 ----
+let busy = false;
+async function addEntry() {
+  if (busy) return;
   const v = addName.value.trim().replace(/\s*#\s*/, "#");
   const by = addBy.value.trim();
-  addMsg.style.color = "#e0a0a0";
-  if (!/^[^#\s]+#\d{3,6}$/.test(v)) {
-    addMsg.textContent = "닉네임#태그 형식으로 입력하세요 (예: 홍길동#31234)";
-    return;
-  }
-  if (!by) { addMsg.textContent = "추가자를 입력하세요"; return; }
-  if (LIST.some(e => norm(e.tag) === norm(v))) {
-    addMsg.textContent = "이미 블랙리스트에 있어요";
-    return;
-  }
   const map = addMap.value.trim();
-  const entry = { tag: v, at: nowStr(), by };
-  if (map) entry.map = map;
-  ADDED.push(entry);
-  const ok = saveAdded(ADDED);
+  if (!/^[^#\s]+#\d{3,6}$/.test(v)) { msg("닉네임#태그 형식으로 입력하세요 (예: 홍길동#31234)"); return; }
+  if (!by) { msg("추가자를 입력하세요"); return; }
+  if (LIST.some(e => norm(e.tag) === norm(v))) { msg("이미 블랙리스트에 있어요"); return; }
+
+  busy = true; addBtn.disabled = true; addBtn.textContent = "추가 중…";
   try { localStorage.setItem("blacklist_by", by); } catch (e) {}
-  addName.value = "";
-  addMap.value = "";
-  addMsg.style.color = "#7fd49a";
-  addMsg.textContent = `${v} 추가됨 (${[map, entry.at, by].filter(Boolean).join(", ")})` + (ok ? "" : " — 이 브라우저에선 저장이 안 돼서 새로고침하면 사라져요");
-  refresh();
+  try {
+    const d = await api({ action: "add", tag: v, map, by });
+    setShared(d.list);
+    if (d.ok) {
+      addName.value = ""; addMap.value = "";
+      const e = SHARED.find(x => norm(x.tag) === norm(v));
+      msg(`${v} 추가됨` + (e ? ` (${[e.map, e.at, e.by].filter(Boolean).join(", ")})` : "") + " — 모두에게 보여요", true);
+    } else if (d.error === "dup") msg("이미 블랙리스트에 있어요 (다른 사람이 먼저 추가함)");
+    else msg("추가 실패: 입력 형식을 확인하세요");
+  } catch (e) {
+    msg("추가 실패: 연결 오류. 잠시 후 다시 시도하세요");
+  } finally {
+    busy = false; addBtn.disabled = false; addBtn.textContent = "추가";
+  }
 }
 
-q.addEventListener("input", check);
-document.getElementById("addBtn").addEventListener("click", addEntry);
-addName.addEventListener("keydown", e => { if (e.key === "Enter") addEntry(); });
+// ---- 맵 선택 ----
+let mapOpts = [], mapSel = -1;
+function drawMaps() {
+  mapOpts = searchMaps(addMap.value);
+  if (!mapOpts.length) { mapList.className = "maplist"; return; }
+  if (mapSel >= mapOpts.length) mapSel = mapOpts.length - 1;
+  mapList.innerHTML = mapOpts.map((m, i) => `<div class="opt${i === mapSel ? " on" : ""}" data-map="${esc(m)}">${esc(m)}</div>`).join("");
+  mapList.className = "maplist open";
+  const on = mapList.querySelector(".on"); if (on) on.scrollIntoView({ block: "nearest" });
+}
+function closeMaps() { mapList.className = "maplist"; mapSel = -1; }
+addMap.addEventListener("focus", () => { mapSel = -1; drawMaps(); });
+addMap.addEventListener("input", () => { mapSel = addMap.value.trim() ? 0 : -1; drawMaps(); });
+addMap.addEventListener("blur", () => setTimeout(closeMaps, 150));
+mapList.addEventListener("mousedown", e => {
+  const o = e.target.closest("[data-map]");
+  if (o) { e.preventDefault(); addMap.value = o.dataset.map; closeMaps(); }
+});
 addMap.addEventListener("keydown", e => {
   if (e.isComposing) return;
   const open = mapList.classList.contains("open");
@@ -302,7 +296,14 @@ addMap.addEventListener("keydown", e => {
   } else if (e.key === "Escape") closeMaps();
 });
 
+q.addEventListener("input", check);
+addBtn.addEventListener("click", addEntry);
+addName.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing) addEntry(); });
+
 renderAll();
+load();
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 }
 </script>
 </body>
