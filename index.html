@@ -63,6 +63,9 @@
   .opt { padding: 11px 14px; font-size: 15px; cursor: pointer; }
   .opt.on, .opt:hover { background: #2c3039; }
   .opt b { color: #f99e1a; font-weight: 600; }
+  .legacy { display: none; margin-top: 12px; padding: 14px; border-radius: 12px; background: #2e2715; border: 1px solid #b8892a; font-size: 14px; line-height: 1.5; }
+  .legacy.show { display: block; }
+  .legacy button { margin-top: 10px; width: 100%; height: 44px; }
   .label { font-size: 12px; color: #8b8f99; margin: 14px 0 6px; }
   details { margin-top: 28px; color: #8b8f99; font-size: 13px; }
   summary { cursor: pointer; }
@@ -87,6 +90,7 @@
     </div>
     <div class="row2"><button id="addBtn" style="width:100%;height:44px">추가</button></div>
     <div id="addMsg" class="msg"></div>
+    <div id="legacy" class="legacy"></div>
   </div>
   <details>
     <summary id="count"></summary>
@@ -227,7 +231,54 @@ function renderAll() {
   document.getElementById("all").innerHTML = html;
 }
 
-function refresh() { renderAll(); check(); }
+function refresh() { renderAll(); check(); showLegacy(); }
+
+// ---- 예전 버전에서 이 브라우저에만 저장된 항목 올리기 ----
+const OLD_KEY = "blacklist_added_v1";
+const legacyBox = document.getElementById("legacy");
+function readLegacy() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(OLD_KEY)) || [];
+    return arr.map(x => typeof x === "string" ? { tag: x } : x).filter(x => x && x.tag);
+  } catch (e) { return []; }
+}
+function pendingLegacy() {
+  return readLegacy().filter(x => !LIST.some(e => norm(e.tag) === norm(x.tag)));
+}
+let uploading = false;
+function showLegacy() {
+  if (!loaded || uploading) return;
+  const p = pendingLegacy();
+  if (!p.length) {
+    legacyBox.className = "legacy";
+    try { if (readLegacy().length) localStorage.removeItem(OLD_KEY); } catch (e) {}
+    return;
+  }
+  legacyBox.className = "legacy show";
+  legacyBox.innerHTML = `예전 버전에서 <b>이 브라우저에만</b> 저장된 닉네임이 ${p.length}개 있어요. 다른 사람한테는 안 보이는 상태예요.<br>` +
+    `<span style="color:#d8c08a">${p.map(x => esc(x.tag) + (x.map ? ` (${esc(x.map)})` : "")).join(", ")}</span>` +
+    `<button id="legacyBtn">공유 목록에 올리기</button>`;
+  document.getElementById("legacyBtn").onclick = uploadLegacy;
+}
+async function uploadLegacy() {
+  if (uploading) return;
+  uploading = true;
+  const btn = document.getElementById("legacyBtn");
+  const p = pendingLegacy();
+  let done = 0, fail = 0;
+  for (const x of p) {
+    btn.textContent = `올리는 중… (${done + fail + 1}/${p.length})`; btn.disabled = true;
+    try {
+      const d = await api({ action: "add", tag: x.tag, map: x.map || "", by: x.by || addBy.value.trim() || "손건준" });
+      if (Array.isArray(d.list)) SHARED = d.list.filter(e => e && e.tag);
+      LIST = BASE.concat(SHARED);
+      if (d.ok || d.error === "dup") done++; else fail++;
+    } catch (e) { fail++; }
+  }
+  uploading = false;
+  msg(fail ? `${done}개 올림, ${fail}개 실패 — 다시 시도해 주세요` : `${done}개를 공유 목록에 올렸어요`, !fail);
+  refresh();
+}
 
 document.addEventListener("click", ev => {
   const n = ev.target.dataset && ev.target.dataset.n;
